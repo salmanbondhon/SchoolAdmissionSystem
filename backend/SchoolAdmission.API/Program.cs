@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolAdmission.API.Data;
 using SchoolAdmission.API.Services;
+using SchoolAdmission.API.Background;
+
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +13,9 @@ builder.Services.AddControllers();
 // Register application services
 builder.Services.AddScoped<StudentIdentificationService>();
 builder.Services.AddScoped<AdmissionHoldService>();
+builder.Services.AddHostedService<HoldExpirationService>();
+
+
 
 // Configure PostgreSQL database connection
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
