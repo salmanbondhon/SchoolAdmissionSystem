@@ -138,4 +138,66 @@ public async Task<IActionResult> CancelHold(
         return Conflict(new { message = ex.Message });
     }
 }
+
+
+
+
+
+// POST: /holds/{holdId}/confirm
+[HttpPost("/holds/{holdId:guid}/confirm")]
+public async Task<ActionResult<ConfirmHoldResponse>> ConfirmHold(
+    Guid holdId,
+    [FromHeader(Name = "X-Student-Id")] string registrationNumber)
+{
+    try
+    {
+        // Identify the student.
+        var student = await _studentService
+            .GetOrCreateStudentAsync(registrationNumber);
+
+        // Confirm the reservation and process simulated payment.
+        var result = await _holdService.ConfirmHoldAsync(
+            holdId,
+            student.Id);
+
+        return Ok(result);
+    }
+    catch (ArgumentException ex)
+    {
+        return BadRequest(new { message = ex.Message });
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return NotFound(new { message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Conflict(new { message = ex.Message });
+    }
+}
+
+
+
+// GET: /me/holds
+[HttpGet("/me/holds")]
+public async Task<ActionResult<List<HoldResponse>>> GetMyHolds(
+    [FromHeader(Name = "X-Student-Id")] string registrationNumber)
+{
+    try
+    {
+        // Identify the student.
+        var student = await _studentService
+            .GetOrCreateStudentAsync(registrationNumber);
+
+        // Retrieve all applications belonging to this student.
+        var holds = await _holdService.GetMyHoldsAsync(
+            student.Id);
+
+        return Ok(holds);
+    }
+    catch (ArgumentException ex)
+    {
+        return BadRequest(new { message = ex.Message });
+    }
+}
 }

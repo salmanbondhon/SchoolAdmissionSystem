@@ -232,4 +232,183 @@ public class AdmissionHoldService
 
         return true;
     }
+
+
+
+
+
+    public async Task<ConfirmHoldResponse> ConfirmHoldAsync(
+    Guid holdId,
+    Guid studentId)
+{
+    await using var transaction =
+        await _context.Database.BeginTransactionAsync();
+
+    // Find the student's hold.
+    var hold = await _context.AdmissionHolds
+        .FirstOrDefaultAsync(h =>
+            h.Id == holdId &&
+            h.StudentId == studentId);
+
+    if (hold == null)
+    {
+        throw new KeyNotFoundException(
+            "Admission hold not found.");
+    }
+
+    // Lock the associated admission class.
+    await _context.AdmissionClasses
+        .FromSqlInterpolated($"""
+            SELECT * FROM "AdmissionClasses"
+            WHERE "Id" = {hold.AdmissionClassId}
+            FOR UPDATE
+            """)
+        .FirstOrDefaultAsync();
+
+    // Reload the hold after acquiring the class lock.
+    await _context.Entry(hold).ReloadAsync();
+
+    // Check whether the hold is already confirmed.
+    if (hold.Status == HoldStatus.Confirmed)
+    {
+        var existingPayment = await _context.Payments
+            .FirstOrDefaultAsync(p =>
+                p.AdmissionHoldId == hold.Id);
+
+        if (existingPayment == null)
+        {
+            throw new InvalidOperationException(
+                "Payment record not found for this confirmation.");
+        }
+
+        await transaction.CommitAsync();
+
+        // Return the existing confirmation.
+        return new ConfirmHoldResponse
+        {
+            HoldId = hold.Id,
+            Status = hold.Status.ToString(),
+            TransactionReference =
+                existingPayment.TransactionReference,
+            Amount = existingPayment.Amount,
+            ConfirmedAt = hold.ConfirmedAt!.Value,
+            Message = "Admission application was already confirmed."
+        };
+    }
+
+    // Only active holds can be confirmed.
+    if (hold.Status != HoldStatus.Active)
+    {
+        throw new InvalidOperationException(
+            "This reservation cannot be confirmed.");
+    }
+
+    // Check expiration.
+    var now = DateTime.UtcNow;
+
+    if (hold.ExpiresAt <= now)
+    {
+        hold.Status = HoldStatus.Expired;
+
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        throw new InvalidOperationException(
+            "Your reservation has expired. Please create a new reservation.");
+    }
+
+    // Read simulated payment amount.
+    // Default amount: 1000.
+    var amount = 1000m;
+
+    var configuredAmount = _configuration["PAYMENT_AMOUNT"];
+
+    if (!string.IsNullOrWhiteSpace(configuredAmount) &&
+        decimal.TryParse(
+            configuredAmount,
+            System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var parsedAmount) &&
+        parsedAmount >= 0)
+    {
+        amount = parsedAmount;
+    }
+
+    // Generate a simulated transaction reference.
+    var transactionReference =
+        $"TXN-{Guid.NewGuid():N}".ToUpperInvariant();
+
+    // Create payment record.
+    var payment = new Payment
+    {
+        AdmissionHoldId = hold.Id,
+        Amount = amount,
+        TransactionReference = transactionReference,
+        IsSuccessful = true,
+        CreatedAt = now,
+        PaidAt = now
+    };
+
+    _context.Payments.Add(payment);
+
+    // Confirm the admission hold.
+    hold.Status = HoldStatus.Confirmed;
+    hold.ConfirmedAt = now;
+
+    await _context.SaveChangesAsync();
+
+    await transaction.CommitAsync();
+
+    return new ConfirmHoldResponse
+    {
+        HoldId = hold.Id,
+        Status = hold.Status.ToString(),
+        TransactionReference = transactionReference,
+        Amount = amount,
+        ConfirmedAt = now,
+        Message = "Admission application confirmed successfully."
+    };
+}
+
+
+
+public async Task<List<HoldResponse>> GetMyHoldsAsync(
+    Guid studentId)
+{
+    var now = DateTime.UtcNow;
+
+    var holds = await _context.AdmissionHolds
+        .Include(h => h.AdmissionClass)
+        .AsNoTracking()
+        .Where(h => h.StudentId == studentId)
+        .OrderByDescending(h => h.CreatedAt)
+        .ToListAsync();
+
+    return holds.Select(hold =>
+    {
+        var remainingSeconds =
+            hold.Status == HoldStatus.Active
+                ? Math.Max(0, (int)Math.Ceiling(
+                    (hold.ExpiresAt - now).TotalSeconds))
+                : 0;
+
+        var status =
+            hold.Status == HoldStatus.Active &&
+            hold.ExpiresAt <= now
+                ? HoldStatus.Expired.ToString()
+                : hold.Status.ToString();
+
+        return new HoldResponse
+        {
+            Id = hold.Id,
+            AdmissionClassId = hold.AdmissionClassId,
+            ClassName = hold.AdmissionClass.Name,
+            Status = status,
+            CreatedAt = hold.CreatedAt,
+            ExpiresAt = hold.ExpiresAt,
+            ConfirmedAt = hold.ConfirmedAt,
+            RemainingSeconds = remainingSeconds
+        };
+    }).ToList();
+}
 }
