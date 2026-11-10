@@ -10,6 +10,23 @@ var builder = WebApplication.CreateBuilder(args);
 // Register controllers
 builder.Services.AddControllers();
 
+
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy
+            .WithOrigins("http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
+
+
+
+
 // Register application services
 builder.Services.AddScoped<StudentIdentificationService>();
 builder.Services.AddScoped<AdmissionHoldService>();
@@ -38,6 +55,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+
+app.UseCors("AllowFrontend");
 app.UseAuthorization();
 
 app.MapControllers();
