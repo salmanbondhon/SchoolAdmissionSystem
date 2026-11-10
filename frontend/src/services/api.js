@@ -37,3 +37,71 @@ export async function createHold(classId, registrationNumber) {
   return data;
 }
 
+
+
+export async function confirmHold(holdId, registrationNumber) {
+  const response = await fetch(
+    `${API_BASE_URL}/holds/${holdId}/confirm`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Student-Id': registrationNumber,
+      },
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.message || data.title || 'Unable to confirm admission.'
+    );
+  }
+
+  return data;
+}
+
+export async function cancelHold(holdId, registrationNumber) {
+  const response = await fetch(
+    `${API_BASE_URL}/holds/${holdId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'X-Student-Id': registrationNumber,
+      },
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.message || data.title || 'Unable to cancel reservation.'
+    );
+  }
+
+  return data;
+}
+
+
+
+export async function getMyHolds(registrationNumber) {
+  const response = await fetch(`${API_BASE_URL}/me/holds`, {
+    method: 'GET',
+    headers: {
+      'X-Student-Id': registrationNumber,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.message || data.detail || data.title ||
+      'Unable to load your applications.'
+    );
+  }
+
+  return data;
+}
+

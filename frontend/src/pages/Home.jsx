@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import Navbar from "../components/Navbar";
-import { getClasses, createHold } from "../services/api";
+import {
+  getClasses,
+  createHold,
+  confirmHold,
+  cancelHold,
+} from "../services/api";
 
 function Home() {
   const [classes, setClasses] = useState([]);
@@ -24,12 +29,9 @@ function Home() {
 
       const result = await createHold(classId, registrationNumber);
 
-setActiveHold(result);
+      setActiveHold(result);
 
-setHoldMessage(
-  'Your seat has been temporarily reserved successfully!'
-);
-
+      setHoldMessage("Your seat has been temporarily reserved successfully!");
 
       await getClasses().then(setClasses);
     } catch (err) {
@@ -38,6 +40,52 @@ setHoldMessage(
       setReservingClassId(null);
     }
   }
+
+
+  const handleConfirm = async (holdId) => {
+  try {
+    setHoldMessage('');
+    setReservingClassId(holdId);
+
+    const result = await confirmHold(holdId, registrationNumber);
+
+    setActiveHold((previous) => ({
+      ...previous,
+      status: result.status,
+      confirmedAt: result.confirmedAt,
+    }));
+
+    setHoldMessage(
+      `Admission confirmed successfully! Transaction: ${result.transactionReference}`
+    );
+
+    const updatedClasses = await getClasses();
+    setClasses(updatedClasses);
+  } catch (error) {
+    setHoldMessage(error.message);
+  } finally {
+    setReservingClassId(null);
+  }
+};
+
+const handleCancel = async (holdId) => {
+  try {
+    setHoldMessage('');
+    setReservingClassId(holdId);
+
+    await cancelHold(holdId, registrationNumber);
+
+    setActiveHold(null);
+    setHoldMessage('Your reservation has been cancelled.');
+
+    const updatedClasses = await getClasses();
+    setClasses(updatedClasses);
+  } catch (error) {
+    setHoldMessage(error.message);
+  } finally {
+    setReservingClassId(null);
+  }
+};
 
   useEffect(() => {
     let isMounted = true;
@@ -72,35 +120,31 @@ setHoldMessage(
     };
   }, []);
 
-
-
-
-
   useEffect(() => {
-  const updateTime = () => {
-    setCurrentTime(Date.now());
-  };
+    const updateTime = () => {
+      setCurrentTime(Date.now());
+    };
 
-  updateTime();
+    updateTime();
 
-  const timer = setInterval(updateTime, 1000);
+    const timer = setInterval(updateTime, 1000);
 
-  return () => clearInterval(timer);
-}, []);
+    return () => clearInterval(timer);
+  }, []);
 
-const remainingSeconds = activeHold
-  ? Math.max(
-      0,
-      Math.ceil(
-        (new Date(activeHold.expiresAt).getTime() - currentTime) / 1000
+  const remainingSeconds = activeHold
+    ? Math.max(
+        0,
+        Math.ceil(
+          (new Date(activeHold.expiresAt).getTime() - currentTime) / 1000,
+        ),
       )
-    )
-  : 0;
+    : 0;
 
-const minutes = Math.floor(remainingSeconds / 60);
-const seconds = remainingSeconds % 60;
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
 
-const countdown = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  const countdown = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 
   return (
     <>
@@ -162,8 +206,8 @@ const countdown = `${String(minutes).padStart(2, '0')}:${String(seconds).padStar
         <section id="classes">
           <h3 className="fw-bold mb-4">Available Admission Classes</h3>
 
-
-          {activeHold && (
+          
+{activeHold && (
   <div className="card border-success shadow-sm mb-4">
     <div className="card-body p-4">
       <h4 className="text-success">
@@ -183,28 +227,65 @@ const countdown = `${String(minutes).padStart(2, '0')}:${String(seconds).padStar
         <strong>Status:</strong> {activeHold.status}
       </p>
 
-      <div className="mt-3">
-        <p className="mb-1">Time remaining:</p>
+      {activeHold.status === 'Active' && (
+        <div className="mt-3">
+          <p className="mb-1">Time remaining:</p>
 
-        <h2 className={`fw-bold ${
-          remainingSeconds <= 60 ? 'text-danger' : 'text-success'
-        }`}>
-          {countdown}
-        </h2>
+          <h2
+            className={`fw-bold ${
+              remainingSeconds <= 60
+                ? 'text-danger'
+                : 'text-success'
+            }`}
+          >
+            {countdown}
+          </h2>
 
-       {remainingSeconds === 0 ? (
-  <div className="alert alert-danger">
-    Your reservation time has expired.
-  </div>
-) : (
-  <div className="alert alert-success">
-    Your seat is temporarily reserved.
-  </div>
-)}
-      </div>
+          {remainingSeconds === 0 ? (
+            <div className="alert alert-danger">
+              Your reservation time has expired.
+            </div>
+          ) : (
+            <div className="alert alert-success">
+              Your seat is temporarily reserved.
+            </div>
+          )}
+
+          <div className="d-flex gap-2 flex-wrap mt-3">
+            <button
+              className="btn btn-primary"
+              onClick={() => handleConfirm(activeHold.id)}
+              disabled={
+                remainingSeconds === 0 ||
+                reservingClassId !== null
+              }
+            >
+              {reservingClassId === activeHold.id
+                ? 'Processing...'
+                : 'Confirm Admission'}
+            </button>
+
+            <button
+              className="btn btn-outline-danger"
+              onClick={() => handleCancel(activeHold.id)}
+              disabled={reservingClassId !== null}
+            >
+              Cancel Reservation
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeHold.status === 'Confirmed' && (
+        <div className="alert alert-success mt-3 mb-0">
+          <i className="bi bi-check-circle-fill me-2"></i>
+          Your admission has been confirmed!
+        </div>
+      )}
     </div>
   </div>
 )}
+
 
           {holdMessage && (
             <div className="alert alert-info mt-3">{holdMessage}</div>
@@ -295,3 +376,4 @@ const countdown = `${String(minutes).padStart(2, '0')}:${String(seconds).padStar
 }
 
 export default Home;
+

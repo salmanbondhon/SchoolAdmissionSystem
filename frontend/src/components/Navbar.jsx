@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 
 function Navbar() {
   return (
@@ -22,24 +24,24 @@ function Navbar() {
           id="navbarContent"
         >
           <ul className="navbar-nav ms-auto">
-            <li className="nav-item">
-              <a className="nav-link active" href="/">
-                Home
-              </a>
-            </li>
+  <li className="nav-item">
+    <Link className="nav-link" to="/">
+      Home
+    </Link>
+  </li>
 
-            <li className="nav-item">
-              <a className="nav-link" href="#classes">
-                Admission Classes
-              </a>
-            </li>
+  <li className="nav-item">
+    <Link className="nav-link" to="/#classes">
+      Admission Classes
+    </Link>
+  </li>
 
-            <li className="nav-item">
-              <a className="nav-link" href="#applications">
-                My Applications
-              </a>
-            </li>
-          </ul>
+  <li className="nav-item">
+    <Link className="nav-link" to="/my-applications">
+      My Applications
+    </Link>
+  </li>
+</ul>
         </div>
       </div>
     </nav>
