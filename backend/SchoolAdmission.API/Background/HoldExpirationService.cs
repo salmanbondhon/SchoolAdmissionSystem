@@ -1,3 +1,4 @@
+
 using Microsoft.EntityFrameworkCore;
 using SchoolAdmission.API.Data;
 using SchoolAdmission.API.Enums;
@@ -34,24 +35,21 @@ public class HoldExpirationService : BackgroundService
 
                 var now = DateTime.UtcNow;
 
-                var expiredHolds = await context.AdmissionHolds
+                var expiredCount = await context.AdmissionHolds
                     .Where(h =>
                         h.Status == HoldStatus.Active &&
                         h.ExpiresAt <= now)
-                    .ToListAsync(stoppingToken);
+                    .ExecuteUpdateAsync(
+                        setters => setters.SetProperty(
+                            h => h.Status,
+                            HoldStatus.Expired),
+                        stoppingToken);
 
-                foreach (var hold in expiredHolds)
+                if (expiredCount > 0)
                 {
-                    hold.Status = HoldStatus.Expired;
-                }
-
-                if (expiredHolds.Count > 0)
-                {
-                    await context.SaveChangesAsync(stoppingToken);
-
                     _logger.LogInformation(
                         "Expired {Count} admission holds.",
-                        expiredHolds.Count);
+                        expiredCount);
                 }
             }
             catch (OperationCanceledException)

@@ -188,51 +188,55 @@ public class AdmissionHoldService
         };
     }
 
-    public async Task<bool> CancelHoldAsync(
+  public async Task<bool> CancelHoldAsync(
     Guid holdId,
     Guid studentId)
+{
+    await using var transaction =
+        await _context.Database.BeginTransactionAsync();
+
+    var hold = await _context.AdmissionHolds
+        .FirstOrDefaultAsync(h =>
+            h.Id == holdId &&
+            h.StudentId == studentId);
+
+    if (hold == null)
     {
-        await using var transaction =
-            await _context.Database.BeginTransactionAsync();
-
-        // Find the hold and lock its associated class.
-        var hold = await _context.AdmissionHolds
-            .FirstOrDefaultAsync(h =>
-                h.Id == holdId &&
-                h.StudentId == studentId);
-
-        if (hold == null)
-        {
-            return false;
-        }
-
-        // Lock the admission class to synchronize
-        // cancellation with reservation and confirmation.
-        await _context.Database.ExecuteSqlInterpolatedAsync($"""
-        SELECT "Id" FROM "AdmissionClasses"
-        WHERE "Id" = {hold.AdmissionClassId}
-        FOR UPDATE
-        """);
-
-        // Reload the hold after acquiring the class lock.
-        await _context.Entry(hold).ReloadAsync();
-
-        if (hold.Status != HoldStatus.Active)
-        {
-            throw new InvalidOperationException(
-                "Only active reservations can be cancelled.");
-        }
-
-        hold.Status = HoldStatus.Cancelled;
-        hold.CancelledAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        await transaction.CommitAsync();
-
-        return true;
+        return false;
     }
 
+    // Lock the admission class row.
+    var admissionClass = await _context.AdmissionClasses
+        .FromSqlInterpolated($"""
+            SELECT * FROM "AdmissionClasses"
+            WHERE "Id" = {hold.AdmissionClassId}
+            FOR UPDATE
+            """)
+        .FirstOrDefaultAsync();
+
+    if (admissionClass == null)
+    {
+        throw new KeyNotFoundException(
+            "Admission class not found.");
+    }
+
+    // Reload the hold after acquiring the lock.
+    await _context.Entry(hold).ReloadAsync();
+
+    if (hold.Status != HoldStatus.Active)
+    {
+        throw new InvalidOperationException(
+            "Only active reservations can be cancelled.");
+    }
+
+    hold.Status = HoldStatus.Cancelled;
+    hold.CancelledAt = DateTime.UtcNow;
+
+    await _context.SaveChangesAsync();
+    await transaction.CommitAsync();
+
+    return true;
+}
 
 
 
