@@ -188,7 +188,8 @@ public class AdmissionHoldService
         };
     }
 
-  public async Task<bool> CancelHoldAsync(
+
+public async Task<bool> CancelHoldAsync(
     Guid holdId,
     Guid studentId)
 {
@@ -202,7 +203,8 @@ public class AdmissionHoldService
 
     if (hold == null)
     {
-        return false;
+        throw new KeyNotFoundException(
+            "Admission hold not found.");
     }
 
     // Lock the admission class row.
@@ -223,6 +225,13 @@ public class AdmissionHoldService
     // Reload the hold after acquiring the lock.
     await _context.Entry(hold).ReloadAsync();
 
+    // Check ownership again after reloading.
+    if (hold.StudentId != studentId)
+    {
+        throw new KeyNotFoundException(
+            "Admission hold not found.");
+    }
+
     if (hold.Status != HoldStatus.Active)
     {
         throw new InvalidOperationException(
@@ -237,6 +246,7 @@ public class AdmissionHoldService
 
     return true;
 }
+
 
 
 

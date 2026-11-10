@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using SchoolAdmission.API.Enums;
 using SchoolAdmission.API.Models;
 using SchoolAdmission.API.Services;
+using SchoolAdmission.API.DTOs.Holds;
 
 namespace SchoolAdmission.Tests;
 
@@ -213,5 +214,303 @@ public async Task CreateHold_ConcurrentRequests_NeverExceedsClassCapacity()
 
     Assert.Equal(3, occupiedSeats);
 }
+
+
+
+
+[Fact]
+public async Task ConfirmHold_RepeatedConfirmation_CreatesOnlyOnePayment()
+{
+    await using var fixture = new PostgresTestFixture();
+    await fixture.InitializeAsync();
+
+    Guid classId;
+    Guid studentId;
+    Guid holdId;
+
+    // Arrange: Create a class and student.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var admissionClass = new AdmissionClass
+        {
+            Name = "Confirmation Test Class",
+            TotalSeats = 5,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var student = new Student
+        {
+            RegistrationNumber = "30000000000000001"
+        };
+
+        context.AdmissionClasses.Add(admissionClass);
+        context.Students.Add(student);
+
+        await context.SaveChangesAsync();
+
+        classId = admissionClass.Id;
+        studentId = student.Id;
+    }
+
+    // Create an admission hold.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var hold = await service.CreateHoldAsync(classId, studentId);
+
+        holdId = hold.Id;
+    }
+
+    // Act: Confirm the same hold twice.
+    ConfirmHoldResponse firstConfirmation;
+    ConfirmHoldResponse secondConfirmation;
+
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        firstConfirmation = await service.ConfirmHoldAsync(
+            holdId,
+            studentId);
+    }
+
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        secondConfirmation = await service.ConfirmHoldAsync(
+            holdId,
+            studentId);
+    }
+
+    // Assert: Both confirmations return the same transaction.
+    Assert.Equal("Confirmed", firstConfirmation.Status);
+    Assert.Equal("Confirmed", secondConfirmation.Status);
+
+    Assert.Equal(
+        firstConfirmation.TransactionReference,
+        secondConfirmation.TransactionReference);
+
+    Assert.Equal(
+        firstConfirmation.Amount,
+        secondConfirmation.Amount);
+
+    // Verify that only one payment exists.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var paymentCount = await context.Payments
+            .CountAsync(p => p.AdmissionHoldId == holdId);
+
+        Assert.Equal(1, paymentCount);
+    }
+}
+
+
+
+
+[Fact]
+public async Task ConfirmHold_DifferentStudent_RejectsAccess()
+{
+    await using var fixture = new PostgresTestFixture();
+    await fixture.InitializeAsync();
+
+    Guid classId;
+    Guid ownerId;
+    Guid otherStudentId;
+    Guid holdId;
+
+    await using (var context = fixture.CreateDbContext())
+    {
+        var admissionClass = new AdmissionClass
+        {
+            Name = "Ownership Test Class",
+            TotalSeats = 5,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var owner = new Student
+        {
+            RegistrationNumber = "40000000000000001"
+        };
+
+        var otherStudent = new Student
+        {
+            RegistrationNumber = "40000000000000002"
+        };
+
+        context.AdmissionClasses.Add(admissionClass);
+        context.Students.AddRange(owner, otherStudent);
+
+        await context.SaveChangesAsync();
+
+        classId = admissionClass.Id;
+        ownerId = owner.Id;
+        otherStudentId = otherStudent.Id;
+    }
+
+    // Owner creates a hold.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var hold = await service.CreateHoldAsync(classId, ownerId);
+        holdId = hold.Id;
+    }
+
+    // Another student tries to confirm the hold.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var exception = await Assert.ThrowsAsync<KeyNotFoundException>(
+            () => service.ConfirmHoldAsync(holdId, otherStudentId));
+
+        Assert.Contains("not found", exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Another student tries to cancel the hold.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var exception = await Assert.ThrowsAsync<KeyNotFoundException>(
+            () => service.CancelHoldAsync(holdId, otherStudentId));
+
+        Assert.Contains("not found", exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Verify that the owner's hold remains active.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var hold = await context.AdmissionHolds
+            .AsNoTracking()
+            .FirstAsync(h => h.Id == holdId);
+
+        Assert.Equal(HoldStatus.Active, hold.Status);
+        Assert.Equal(ownerId, hold.StudentId);
+    }
+}
+
+
+
+[Fact]
+public async Task CancelHold_ReleasesSeatForAnotherStudent()
+{
+    await using var fixture = new PostgresTestFixture();
+    await fixture.InitializeAsync();
+
+    Guid classId;
+    Guid firstStudentId;
+    Guid secondStudentId;
+
+    // Arrange: Create a class with one seat.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var admissionClass = new AdmissionClass
+        {
+            Name = "Cancellation Capacity Test",
+            TotalSeats = 1,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var firstStudent = new Student
+        {
+            RegistrationNumber = "50000000000000001"
+        };
+
+        var secondStudent = new Student
+        {
+            RegistrationNumber = "50000000000000002"
+        };
+
+        context.AdmissionClasses.Add(admissionClass);
+        context.Students.AddRange(firstStudent, secondStudent);
+
+        await context.SaveChangesAsync();
+
+        classId = admissionClass.Id;
+        firstStudentId = firstStudent.Id;
+        secondStudentId = secondStudent.Id;
+    }
+
+    Guid firstHoldId;
+
+    // Student A reserves the only seat.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var hold = await service.CreateHoldAsync(
+            classId,
+            firstStudentId);
+
+        firstHoldId = hold.Id;
+    }
+
+    // Student A cancels the reservation.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var cancelled = await service.CancelHoldAsync(
+            firstHoldId,
+            firstStudentId);
+
+        Assert.True(cancelled);
+    }
+
+    // Student B reserves the released seat.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var service = new AdmissionHoldService(
+            context,
+            fixture.Configuration);
+
+        var secondHold = await service.CreateHoldAsync(
+            classId,
+            secondStudentId);
+
+        Assert.Equal("Active", secondHold.Status);
+    }
+
+    // Verify database state.
+    await using (var context = fixture.CreateDbContext())
+    {
+        var firstHold = await context.AdmissionHolds
+            .AsNoTracking()
+            .FirstAsync(h => h.Id == firstHoldId);
+
+        Assert.Equal(HoldStatus.Cancelled, firstHold.Status);
+
+        var activeHolds = await context.AdmissionHolds
+            .CountAsync(h =>
+                h.AdmissionClassId == classId &&
+                h.Status == HoldStatus.Active &&
+                h.ExpiresAt > DateTime.UtcNow);
+
+        Assert.Equal(1, activeHolds);
+    }
+}
+
+
 
 }
