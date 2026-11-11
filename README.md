@@ -117,11 +117,11 @@ No separate installation of PostgreSQL, .NET SDK, or Node.js is required to run 
 ### 1. Clone the repository
 
 ```bash
-git clone PUBGLIC_ITHUB_REPOSITORY_URL
+git clone https://github.com/salmanbondhon/SchoolAdmissionSystem
 cd SchoolAdmissionSystem
 ```
 
-Replace `PUBLIC_GITHUB_REPOSITORY_URL` with the actual GitHub repository URL.
+Replace `https://github.com/salmanbondhon/SchoolAdmissionSystem` with the actual GitHub repository URL.
 
 ### 2. Configure environment variables
 
