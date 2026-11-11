@@ -386,6 +386,7 @@ public async Task<bool> CancelHoldAsync(
 
 
 
+
 public async Task<List<HoldResponse>> GetMyHoldsAsync(
     Guid studentId)
 {
@@ -393,6 +394,7 @@ public async Task<List<HoldResponse>> GetMyHoldsAsync(
 
     var holds = await _context.AdmissionHolds
         .Include(h => h.AdmissionClass)
+        .Include(h => h.Payment)
         .AsNoTracking()
         .Where(h => h.StudentId == studentId)
         .OrderByDescending(h => h.CreatedAt)
@@ -421,8 +423,15 @@ public async Task<List<HoldResponse>> GetMyHoldsAsync(
             CreatedAt = hold.CreatedAt,
             ExpiresAt = hold.ExpiresAt,
             ConfirmedAt = hold.ConfirmedAt,
-            RemainingSeconds = remainingSeconds
+            RemainingSeconds = remainingSeconds,
+
+            // Payment information
+            PaymentAmount = hold.Payment?.Amount,
+            TransactionReference = hold.Payment?.TransactionReference,
+            PaymentSuccessful = hold.Payment?.IsSuccessful,
+            PaidAt = hold.Payment?.PaidAt
         };
     }).ToList();
 }
+
 }

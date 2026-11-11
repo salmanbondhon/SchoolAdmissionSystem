@@ -1,3 +1,4 @@
+
 namespace SchoolAdmission.API.DTOs.Holds;
 
 public class HoldResponse
@@ -17,4 +18,13 @@ public class HoldResponse
     public DateTime? ConfirmedAt { get; set; }
 
     public int RemainingSeconds { get; set; }
+
+    // Payment information
+    public decimal? PaymentAmount { get; set; }
+
+    public string? TransactionReference { get; set; }
+
+    public bool? PaymentSuccessful { get; set; }
+
+    public DateTime? PaidAt { get; set; }
 }

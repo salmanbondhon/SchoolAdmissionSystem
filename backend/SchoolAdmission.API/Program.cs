@@ -1,17 +1,15 @@
+
 using Microsoft.EntityFrameworkCore;
 using SchoolAdmission.API.Data;
 using SchoolAdmission.API.Services;
 using SchoolAdmission.API.Background;
-
-
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Register controllers
 builder.Services.AddControllers();
 
-
-
+// Configure CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -23,19 +21,14 @@ builder.Services.AddCors(options =>
     });
 });
 
-
-
-
-
 // Register application services
 builder.Services.AddScoped<StudentIdentificationService>();
 builder.Services.AddScoped<AdmissionHoldService>();
 builder.Services.AddHostedService<HoldExpirationService>();
 
-
-
 // Configure PostgreSQL database connection
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+var connectionString = builder.Configuration
+    .GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException(
         "Database connection string is not configured.");
 
@@ -48,13 +41,21 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Apply pending database migrations automatically
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider
+        .GetRequiredService<ApplicationDbContext>();
+
+    dbContext.Database.Migrate();
+}
+
 // Configure HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
 
 app.UseCors("AllowFrontend");
 app.UseAuthorization();

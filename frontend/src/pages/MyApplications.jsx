@@ -1,15 +1,88 @@
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Navbar from '../components/Navbar';
 import { getMyHolds } from '../services/api';
 
 function MyApplications() {
-  const [registrationNumber, setRegistrationNumber] = useState('');
+  const [registrationNumber, setRegistrationNumber] = useState(() => {
+    const saved = localStorage.getItem('studentRegistrationNumber');
+    return saved && /^\d{17}$/.test(saved) ? saved : '';
+  });
+
+  const [activeRegistrationNumber, setActiveRegistrationNumber] =
+    useState(() => {
+      const saved = localStorage.getItem('studentRegistrationNumber');
+      return saved && /^\d{17}$/.test(saved) ? saved : '';
+    });
+
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
+  // Initial loading and student restoration
+  useEffect(() => {
+    if (!/^\d{17}$/.test(activeRegistrationNumber)) {
+      return;
+    }
+
+    let ignore = false;
+
+    const fetchApplications = async () => {
+      try {
+        const data = await getMyHolds(activeRegistrationNumber);
+
+        if (!ignore) {
+          setApplications(data);
+          setError('');
+          setSearched(true);
+          setLastUpdated(new Date());
+        }
+      } catch (err) {
+        if (!ignore) {
+          setError(err.message);
+        }
+      }
+    };
+
+    fetchApplications();
+
+    return () => {
+      ignore = true;
+    };
+  }, [activeRegistrationNumber]);
+
+  // Fetch applications for manual search and periodic refresh
+  const loadApplications = useCallback(async (studentId) => {
+    try {
+      const data = await getMyHolds(studentId);
+
+      setApplications(data);
+      setError('');
+      setSearched(true);
+      setLastUpdated(new Date());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Automatically refresh applications every 5 seconds
+  useEffect(() => {
+    if (!/^\d{17}$/.test(activeRegistrationNumber)) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      loadApplications(activeRegistrationNumber);
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+  }, [activeRegistrationNumber, loadApplications]);
+
+  // Manually search applications
   const handleSearch = async (event) => {
     event.preventDefault();
 
@@ -18,37 +91,45 @@ function MyApplications() {
       return;
     }
 
-    try {
-      setLoading(true);
-      setError('');
-      setSearched(false);
+    localStorage.setItem(
+      'studentRegistrationNumber',
+      registrationNumber
+    );
 
-      const data = await getMyHolds(registrationNumber);
+    setError('');
+    setLoading(true);
 
-      setApplications(data);
-      setSearched(true);
-    } catch (err) {
-      setError(err.message);
-      setApplications([]);
-    } finally {
-      setLoading(false);
+    if (activeRegistrationNumber === registrationNumber) {
+      await loadApplications(registrationNumber);
+    } else {
+      setActiveRegistrationNumber(registrationNumber);
     }
   };
 
+  // Clear saved registration number
+  const handleClear = () => {
+    localStorage.removeItem('studentRegistrationNumber');
+
+    setRegistrationNumber('');
+    setActiveRegistrationNumber('');
+    setApplications([]);
+    setSearched(false);
+    setError('');
+    setLastUpdated(null);
+    setLoading(false);
+  };
+
+  // Application status badge
   const getStatusBadge = (status) => {
     switch (status?.toLowerCase()) {
       case 'active':
         return 'bg-primary';
-
       case 'confirmed':
         return 'bg-success';
-
       case 'cancelled':
         return 'bg-secondary';
-
       case 'expired':
         return 'bg-danger';
-
       default:
         return 'bg-dark';
     }
@@ -66,6 +147,7 @@ function MyApplications() {
           </p>
         </div>
 
+        {/* Student Identification */}
         <div className="card shadow-sm mb-4">
           <div className="card-body p-4">
             <h5 className="mb-3">
@@ -97,22 +179,52 @@ function MyApplications() {
               >
                 {loading ? 'Searching...' : 'View Applications'}
               </button>
+
+              <button
+                type="button"
+                className="btn btn-outline-secondary ms-2"
+                onClick={handleClear}
+              >
+                Clear Saved Number
+              </button>
             </form>
           </div>
         </div>
 
-        {error && (
-          <div className="alert alert-danger">
-            {error}
+        {/* Loading */}
+        {loading && (
+          <div className="text-center my-4">
+            <div className="spinner-border text-primary" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="text-muted mt-2">
+              Loading your applications...
+            </p>
           </div>
         )}
 
-        {searched && applications.length === 0 && (
+        {/* Error */}
+        {error && (
+          <div className="alert alert-danger">{error}</div>
+        )}
+
+        {/* Last Updated */}
+        {searched && lastUpdated && (
+          <p className="text-muted small">
+            <i className="bi bi-arrow-repeat me-1"></i>
+            Automatically refreshing every 5 seconds.
+            Last updated: {lastUpdated.toLocaleTimeString()}
+          </p>
+        )}
+
+        {/* No Applications */}
+        {searched && applications.length === 0 && !loading && (
           <div className="alert alert-info">
             No admission applications found for this registration number.
           </div>
         )}
 
+        {/* Application List */}
         {applications.length > 0 && (
           <>
             <h4 className="mb-3">
@@ -159,6 +271,51 @@ function MyApplications() {
                           <strong>Confirmed:</strong>{' '}
                           {new Date(application.confirmedAt).toLocaleString()}
                         </p>
+                      )}
+
+                      {/* Payment Information */}
+                      {application.transactionReference && (
+                        <div className="border-top pt-3 mt-3">
+                          <h6 className="text-success">
+                            <i className="bi bi-credit-card me-2"></i>
+                            Payment Information
+                          </h6>
+
+                          <p className="mb-2">
+                            <strong>Transaction Reference:</strong>
+                            <br />
+                            <small>
+                              {application.transactionReference}
+                            </small>
+                          </p>
+
+                          <p className="mb-2">
+                            <strong>Payment Amount:</strong>{' '}
+                            {application.paymentAmount}
+                          </p>
+
+                          <p className="mb-2">
+                            <strong>Payment Status:</strong>{' '}
+                            <span
+                              className={`badge ${
+                                application.paymentSuccessful
+                                  ? 'bg-success'
+                                  : 'bg-danger'
+                              }`}
+                            >
+                              {application.paymentSuccessful
+                                ? 'Successful'
+                                : 'Failed'}
+                            </span>
+                          </p>
+
+                          {application.paidAt && (
+                            <p className="mb-0">
+                              <strong>Paid At:</strong>{' '}
+                              {new Date(application.paidAt).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
